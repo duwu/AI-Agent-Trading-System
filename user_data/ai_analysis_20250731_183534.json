@@ -1,0 +1,41 @@
+{
+  "symbol": "BTC/USDT",
+  "timestamp": "2025-07-31T18:35:34.289666",
+  "current_price": 118517.33,
+  "real_market_data": {
+    "symbol": "BTC/USDT",
+    "price": 118517.33,
+    "change_24h": 0.143,
+    "volume_24h": 16981.75072,
+    "high_24h": 118922.45,
+    "low_24h": 115796.23,
+    "timestamp": "2025-07-31T18:35:34.263551",
+    "source": "binance"
+  },
+  "analysis": {
+    "technical_score": -0.025000000000000022,
+    "sentiment_score": -0.3,
+    "combined_score": -0.10750000000000001,
+    "action": "HOLD",
+    "confidence": 0.8925,
+    "risk_level": 0.03954498450626486,
+    "indicators": {
+      "rsi": 83.42340506878787,
+      "sma_20": 116986.93522433017,
+      "sma_50": 116602.56809051562,
+      "macd": 313.82457466662163,
+      "bb_position": "middle"
+    }
+  },
+  "news": {
+    "title": "Market volatility increases amid economic uncertainty",
+    "sentiment": -0.3
+  },
+  "technical_indicators": {
+    "rsi": 83.42340506878787,
+    "sma_20": 116986.93522433017,
+    "sma_50": 116602.56809051562,
+    "macd": 313.82457466662163,
+    "volatility": 0.0019772492253132433
+  }
+}

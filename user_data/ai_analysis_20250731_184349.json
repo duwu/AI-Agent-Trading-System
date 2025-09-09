@@ -1,0 +1,41 @@
+{
+  "symbol": "BTC/USDT",
+  "timestamp": "2025-07-31T18:43:49.229936",
+  "current_price": 118500.0,
+  "real_market_data": {
+    "symbol": "BTC/USDT",
+    "price": 118500.0,
+    "change_24h": 0.08,
+    "volume_24h": 16845.54969,
+    "high_24h": 118922.45,
+    "low_24h": 115796.23,
+    "timestamp": "2025-07-31T18:43:48.875169",
+    "source": "binance"
+  },
+  "analysis": {
+    "technical_score": -0.23107068745094417,
+    "sentiment_score": 0.7,
+    "combined_score": 0.048250518784339086,
+    "action": "HOLD",
+    "confidence": 0.9517494812156609,
+    "risk_level": 0.005181214587742343,
+    "indicators": {
+      "rsi": 43.0479957523622,
+      "sma_20": 118533.57800000001,
+      "sma_50": 118617.10859999999,
+      "macd": -29.614319303247612,
+      "bb_position": "middle"
+    }
+  },
+  "news": {
+    "title": "Technical analysis suggests bullish breakout pattern",
+    "sentiment": 0.7
+  },
+  "technical_indicators": {
+    "rsi": 43.0479957523622,
+    "sma_20": 118533.57800000001,
+    "sma_50": 118617.10859999999,
+    "macd": -29.614319303247612,
+    "volatility": 0.00025906072938711714
+  }
+}

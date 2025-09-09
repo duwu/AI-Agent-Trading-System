@@ -1,0 +1,74 @@
+{
+  "timestamp": "2025-07-31T17:46:13.934872",
+  "symbol": "BTC",
+  "twitter_integration": {
+    "client_available": true,
+    "social_sentiment": {
+      "sentiment_score": 0.0,
+      "mention_count": 0,
+      "engagement_score": 0.5
+    },
+    "twitter_data_available": true
+  },
+  "comprehensive_analysis": {
+    "symbol": "BTC",
+    "news": {
+      "sentiment_score": 0.6363636363636364,
+      "volume": 30,
+      "headlines": [
+        "AI is creating two-person companies that scale",
+        "Bitcoin, Ether, XRP Fall on a Big Day for Crypto. It\u2019s About Much More than the Fed",
+        "$5.5 Billion gone in a day: How a bitcoin loan turned into a financial black hole for Mexican billionaire Ricardo Salinas Pliego",
+        "7% dip or $141K breakout? Bitcoin speculators dictate BTC price targets",
+        "Billionaire Ray Dalio Says 15% of Portfolio in Gold or Bitcoin (BTC) Necessary for Upcoming Money Devaluation Phase",
+        "Best altcoin to buy now? BPENGU builds on BTC\u2019s momentum, raises over $1.5M",
+        "Stablecoins inspire hope, and hype, in Hong Kong",
+        "Majority of Indian crypto investors prefer Blue-chip coins worth $50 billion and above",
+        "Senator Lummis Champions New Crypto Bill To Enable Digital Payments For Home Loans",
+        "SEC delays decision on Trump\u2019s Truth Social Bitcoin ETF \u2013 Details inside!"
+      ]
+    },
+    "market": {
+      "price": 0.0,
+      "volume_24h": 0.0,
+      "price_change_24h": 0.0
+    },
+    "social": {
+      "sentiment_score": 0.0,
+      "mention_count": 0,
+      "engagement_score": 0.5
+    },
+    "macro_economic": {
+      "nasdaq": {
+        "price": null,
+        "change": null,
+        "trend": null
+      },
+      "fed": {
+        "rate": null,
+        "next_fomc": null,
+        "sentiment": null
+      },
+      "cpi": {
+        "current": 4.0,
+        "previous": 4.0,
+        "next_date": "2025-08-15"
+      },
+      "indices": {
+        "dxy": null,
+        "vix": null,
+        "gold": null
+      }
+    },
+    "timestamp": "2025-07-31T17:46:13.934672",
+    "openai_sentiment": {
+      "summary": "OpenAI\u9519\u8bef: cannot import name 'get_openai_analyzer' from 'ai_agent.openai_analyzer' (/Users/zayn/python/ai_agent_trading_system/ai_agent/openai_analyzer.py)"
+    },
+    "openai_context": {
+      "analysis": "OpenAI\u9519\u8bef: cannot import name 'get_openai_analyzer' from 'ai_agent.openai_analyzer' (/Users/zayn/python/ai_agent_trading_system/ai_agent/openai_analyzer.py)"
+    },
+    "openai_insights": {
+      "insights": "OpenAI\u9519\u8bef: cannot import name 'get_openai_analyzer' from 'ai_agent.openai_analyzer' (/Users/zayn/python/ai_agent_trading_system/ai_agent/openai_analyzer.py)"
+    }
+  }
+}

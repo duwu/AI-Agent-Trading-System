@@ -1,0 +1,41 @@
+{
+  "symbol": "BTC/USDT",
+  "timestamp": "2025-07-31T17:43:06.355024",
+  "current_price": 118534.21,
+  "real_market_data": {
+    "symbol": "BTC/USDT",
+    "price": 118534.21,
+    "change_24h": 0.411,
+    "volume_24h": 17184.16202,
+    "high_24h": 118922.45,
+    "low_24h": 115796.23,
+    "timestamp": "2025-07-31T17:43:06.314310",
+    "source": "binance"
+  },
+  "analysis": {
+    "technical_score": 0.025000000000000022,
+    "sentiment_score": 0.8,
+    "combined_score": 0.2575,
+    "action": "HOLD",
+    "confidence": 0.7424999999999999,
+    "risk_level": 1.0,
+    "indicators": {
+      "rsi": 3.075285295651071,
+      "sma_20": 167248.8599548912,
+      "sma_50": 168396.70504738696,
+      "macd": -4411.043010164634,
+      "bb_position": "middle"
+    }
+  },
+  "news": {
+    "title": "Bitcoin hits new monthly high as institutional adoption grows",
+    "sentiment": 0.8
+  },
+  "technical_indicators": {
+    "rsi": 3.075285295651071,
+    "sma_20": 167248.8599548912,
+    "sma_50": 168396.70504738696,
+    "macd": -4411.043010164634,
+    "volatility": 0.06581487696900283
+  }
+}

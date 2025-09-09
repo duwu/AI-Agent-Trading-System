@@ -1,0 +1,41 @@
+{
+  "symbol": "BTC/USDT",
+  "timestamp": "2025-07-31T17:56:44.559502",
+  "current_price": 118600.0,
+  "real_market_data": {
+    "symbol": "BTC/USDT",
+    "price": 118600.0,
+    "change_24h": 0.388,
+    "volume_24h": 17140.52037,
+    "high_24h": 118922.45,
+    "low_24h": 115796.23,
+    "timestamp": "2025-07-31T17:56:44.533827",
+    "source": "binance"
+  },
+  "analysis": {
+    "technical_score": -0.025000000000000022,
+    "sentiment_score": -0.4,
+    "combined_score": -0.1375,
+    "action": "HOLD",
+    "confidence": 0.8625,
+    "risk_level": 0.07733026412156258,
+    "indicators": {
+      "rsi": 81.72219327201415,
+      "sma_20": 115752.10033981924,
+      "sma_50": 115287.29387244975,
+      "macd": 498.2797485615447,
+      "bb_position": "middle"
+    }
+  },
+  "news": {
+    "title": "Regulatory concerns weigh on crypto market",
+    "sentiment": -0.4
+  },
+  "technical_indicators": {
+    "rsi": 81.72219327201415,
+    "sma_20": 115752.10033981924,
+    "sma_50": 115287.29387244975,
+    "macd": 498.2797485615447,
+    "volatility": 0.0038665132060781288
+  }
+}

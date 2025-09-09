@@ -1,0 +1,166 @@
+{
+    "trading_mode": "spot",
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": 0.1,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    
+    "user_data_dir": "user_data",
+    "strategy_path": "strategies",
+    
+    "timeframe": "5m",
+    "cancel_open_orders_on_exit": false,
+    
+    "bid_strategy": {
+        "price_side": "bid",
+        "ask_last_balance": 0.0,
+        "use_order_book": true,
+        "order_book_top": 1,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    
+    "ask_strategy": {
+        "price_side": "ask",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    
+    "exchange": {
+        "name": "binance",
+        "sandbox": false,
+        "key": "",
+        "secret": "",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "rateLimit": 1200
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "rateLimit": 1200
+        },
+        "pair_whitelist": [
+            "BCH/USDT",
+            "HYPE/USDT",
+            "ETH/USDT"
+        ],
+        "pair_blacklist": [
+            ".*UP/.*",
+            ".*DOWN/.*",
+            ".*/BTC"
+        ]
+    },
+    
+    "entry_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    
+    "exit_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    
+    "freqai": {
+        "enabled": true,
+        "purge_old_models": 2,
+        "train_period_days": 7,
+        "backtest_period_days": 2,
+        "live_retrain_hours": 0,
+        "expiration_hours": 1,
+        "identifier": "ai_agent_ensemble",
+        "live_trained_timestamp": 0,
+        "data_kitchen_thread_count": 4,
+        "activate_tensorboard": true,
+        
+        "feature_parameters": {
+            "include_timeframes": ["5m", "15m", "1h"],
+            "include_corr_pairlist": ["BTC/USDT"],
+            "label_period_candles": 24,
+            "include_shifted_candles": 2,
+            "DI_threshold": 0.9,
+            "weight_factor": 0.9,
+            "principal_component_analysis": false,
+            "use_SVM_to_remove_outliers": true,
+            "indicator_periods_candles": [10, 20, 50],
+            "plot_feature_importances": 0,
+            "noise_standard_deviation": 0.05,
+            "outlier_protection_percentage": 30
+        },
+        
+        "data_split_parameters": {
+            "test_size": 0.25,
+            "shuffle": false,
+            "random_state": 42
+        },
+        
+        "model_training_parameters": {
+            "n_estimators": 300,
+            "max_depth": 8,
+            "learning_rate": 0.05,
+            "random_state": 42
+        }
+    },
+    
+    "ai_agent": {
+        "enabled": true,
+        "news_sources": {
+            "newsapi_key": "",
+            "alpha_vantage_key": "",
+            "polygon_key": ""
+        },
+        "social_media": {
+            "twitter_bearer_token": "",
+            "reddit_client_id": "",
+            "reddit_client_secret": ""
+        },
+        "sentiment_weights": {
+            "news": 0.4,
+            "social": 0.3,
+            "technical": 0.3
+        },
+        "signal_threshold": 0.6,
+        "confidence_threshold": 0.5,
+        "risk_level": "medium",
+        "max_position_size": 0.1,
+        "news_lookback_hours": 24,
+        "sentiment_cache_minutes": 30
+    },
+    
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": ""
+    },
+    
+    "api_server": {
+        "enabled": false,
+        "listen_ip_address": "127.0.0.1",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "somethingrandom",
+        "CORS_origins": [],
+        "username": "",
+        "password": ""
+    },
+    
+    "bot_name": "AI Agent Trading Bot",
+    "initial_state": "running",
+    "force_entry_enable": false,
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}
