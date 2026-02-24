@@ -225,6 +225,8 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['openai_market_state'] = 'neutral'
         dataframe['openai_recommendation'] = 'hold'
         dataframe['openai_strength'] = 0.5
+        dataframe['openai_used'] = False
+        dataframe['openai_error'] = ''
         dataframe['openai_full_analysis'] = ''
         dataframe['openai_technical_score'] = 5.0
         dataframe['openai_macro_score'] = 5.0
@@ -233,12 +235,12 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['openai_stop_loss'] = None
         
         # 宏观经济数据默认值
-        dataframe['macro_nasdaq_trend'] = "unknown"
-        dataframe['macro_fed_sentiment'] = "unknown"
-        dataframe['macro_vix_level'] = 20.0
-        dataframe['macro_dxy_index'] = 100.0
-        dataframe['macro_gold_price'] = 2000.0
-        dataframe['macro_score'] = 0.0
+        dataframe['macro_nasdaq_trend'] = None
+        dataframe['macro_fed_sentiment'] = None
+        dataframe['macro_vix_level'] = np.nan
+        dataframe['macro_dxy_index'] = np.nan
+        dataframe['macro_gold_price'] = np.nan
+        dataframe['macro_score'] = np.nan
         
         # 时间框架得分
         for tf in ['5m', '15m', '1h', '4h']:
@@ -264,10 +266,19 @@ class AIAgentTradingStrategy(IStrategy):
             provider.get_crypto_news(news_symbol),
             provider.get_social_sentiment(news_symbol)
         ]
-        macro_data, news_data, social_data = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=False))
+        macro_data, news_data, social_data = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+
+        if isinstance(macro_data, Exception):
+            raise RuntimeError(f"宏观数据获取失败: {macro_data}") from macro_data
+        if isinstance(news_data, Exception):
+            logger.warning(f"新闻数据获取失败(已降级为可选): {news_data}")
+            news_data = None
+        if isinstance(social_data, Exception):
+            logger.warning(f"社媒数据获取失败(已降级为可选): {social_data}")
+            social_data = {"sentiment_score": 0.0, "mention_count": 0, "engagement_score": 0.5}
 
         # 判定新闻与社交是否可用（不终止，缺失则后续权重忽略）
-        news_available = hasattr(news_data, 'volume') and getattr(news_data, 'volume', 0) > 0
+        news_available = news_data is not None and hasattr(news_data, 'volume') and getattr(news_data, 'volume', 0) > 0
         social_available = isinstance(social_data, dict) and 'sentiment_score' in social_data
 
         # 构建情感输入，仅包含真实获取到的部分
@@ -300,7 +311,10 @@ class AIAgentTradingStrategy(IStrategy):
 
         # 宏观经济影响评分
         macro_score = self._analyze_macro_impact(macro_data)
-        analysis['combined_score'] = combined_base * 0.6 + macro_score * 0.4
+        if macro_score is None:
+            analysis['combined_score'] = combined_base
+        else:
+            analysis['combined_score'] = combined_base * 0.6 + macro_score * 0.4
         analysis['macro_score'] = macro_score
 
         # OpenAI增强（硬失败）
@@ -321,6 +335,8 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['openai_market_state'] = analysis.get('openai_market_state', 'neutral')
         dataframe['openai_recommendation'] = analysis.get('openai_recommendation', 'hold')
         dataframe['openai_strength'] = analysis.get('openai_strength', 0.5)
+        dataframe['openai_used'] = bool(analysis.get('openai_used', False))
+        dataframe['openai_error'] = analysis.get('openai_error', '')
         dataframe['openai_full_analysis'] = analysis.get('openai_full_analysis', '')
         dataframe['openai_technical_score'] = analysis.get('openai_technical_score', 5.0)
         dataframe['openai_macro_score'] = analysis.get('openai_macro_score', 5.0)
@@ -333,11 +349,11 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['openai_timeframe_summary'] = analysis.get('openai_timeframe_summary', '')
         dataframe['openai_key_reason'] = analysis.get('openai_key_reason', '')
 
-        dataframe['macro_nasdaq_trend'] = macro_data.nasdaq_trend or 'neutral'
-        dataframe['macro_fed_sentiment'] = macro_data.fomc_sentiment or 'neutral'
-        dataframe['macro_vix_level'] = macro_data.vix_index or 20.0
-        dataframe['macro_dxy_index'] = macro_data.dxy_index or 100.0
-        dataframe['macro_gold_price'] = macro_data.gold_price or 2000.0
+        dataframe['macro_nasdaq_trend'] = macro_data.nasdaq_trend
+        dataframe['macro_fed_sentiment'] = macro_data.fomc_sentiment
+        dataframe['macro_vix_level'] = macro_data.vix_index
+        dataframe['macro_dxy_index'] = macro_data.dxy_index
+        dataframe['macro_gold_price'] = macro_data.gold_price
         dataframe['macro_score'] = macro_score
 
         timeframe_scores = analysis.get('timeframe_scores', {})
@@ -346,13 +362,15 @@ class AIAgentTradingStrategy(IStrategy):
 
         return dataframe
 
-    def _analyze_macro_impact(self, macro_data) -> float:
+    def _analyze_macro_impact(self, macro_data) -> Optional[float]:
         """分析宏观经济数据对加密货币的影响"""
         try:
             macro_score = 0.0
+            has_macro_input = False
             
             # 纳斯达克影响分析 (权重: 35%)
             if macro_data.nasdaq_trend:
+                has_macro_input = True
                 if macro_data.nasdaq_trend == "strong_bullish":
                     macro_score += 0.35 * 0.8  # 强烈利好
                 elif macro_data.nasdaq_trend == "bullish":
@@ -365,6 +383,7 @@ class AIAgentTradingStrategy(IStrategy):
             
             # 美联储政策影响分析 (权重: 30%)
             if macro_data.fomc_sentiment:
+                has_macro_input = True
                 if macro_data.fomc_sentiment == "dovish":
                     macro_score += 0.30 * 0.6  # 鸽派政策利好
                 elif macro_data.fomc_sentiment == "hawkish":
@@ -373,6 +392,7 @@ class AIAgentTradingStrategy(IStrategy):
             
             # VIX恐慌指数影响分析 (权重: 20%)
             if macro_data.vix_index:
+                has_macro_input = True
                 if macro_data.vix_index > 30:
                     macro_score += 0.20 * (-0.7)  # 高恐慌指数利空
                 elif macro_data.vix_index < 15:
@@ -382,6 +402,7 @@ class AIAgentTradingStrategy(IStrategy):
             
             # 美元指数DXY影响分析 (权重: 10%)
             if macro_data.dxy_index:
+                has_macro_input = True
                 # 美元指数上升通常对加密货币不利
                 if macro_data.dxy_index > 105:
                     macro_score += 0.10 * (-0.4)  # 强美元利空
@@ -390,12 +411,17 @@ class AIAgentTradingStrategy(IStrategy):
             
             # 黄金价格影响分析 (权重: 5%)
             if macro_data.gold_price:
+                has_macro_input = True
                 # 黄金上涨通常表明避险情绪，可能利好加密货币作为另类资产
                 # 这里简化处理，基于黄金价格范围判断
                 if macro_data.gold_price > 2100:  # 高金价
                     macro_score += 0.05 * 0.3
                 elif macro_data.gold_price < 1800:  # 低金价
                     macro_score += 0.05 * (-0.2)
+
+            if not has_macro_input:
+                logger.info("宏观数据为空，宏观评分留空")
+                return None
             
             # 限制分数范围在 [-1, 1]
             macro_score = max(-1.0, min(1.0, macro_score))
@@ -405,7 +431,7 @@ class AIAgentTradingStrategy(IStrategy):
             
         except Exception as e:
             logger.error(f"宏观经济影响分析错误: {e}")
-            return 0.0
+            return None
 
     def _enhance_with_openai_analysis(self, dataframe: DataFrame, symbol: str, analysis: dict, macro_score: float) -> dict:
         """使用OpenAI增强分析 - 传递更详细的数据"""
@@ -436,10 +462,10 @@ class AIAgentTradingStrategy(IStrategy):
                 # 准备宏观经济数据
                 macro_economic_data = {
                     "nasdaq_change": 0.0,  # 可以从宏观数据计算
-                    "vix_level": latest.get('macro_vix_level', 20.0),
-                    "fed_sentiment": latest.get('macro_fed_sentiment', 'neutral'),
-                    "dxy_index": latest.get('macro_dxy_index', 100.0),
-                    "gold_price": latest.get('macro_gold_price', 2000.0)
+                    "vix_level": latest.get('macro_vix_level'),
+                    "fed_sentiment": latest.get('macro_fed_sentiment'),
+                    "dxy_index": latest.get('macro_dxy_index'),
+                    "gold_price": latest.get('macro_gold_price')
                 }
                 
                 # 准备新闻情绪数据
@@ -468,6 +494,8 @@ class AIAgentTradingStrategy(IStrategy):
                 if isinstance(ai_result, dict) and ai_result.get("analysis_type") == "fallback":
                     logger.warning("OpenAI不可用或调用失败，跳过专业级分析输出")
                     analysis['openai_used'] = False
+                    analysis['openai_error'] = str(ai_result.get('openai_error') or ai_result.get('reasoning') or 'unknown')
+                    analysis['openai_full_analysis'] = ''
                     return analysis
 
                 # 将OpenAI分析结果融入最终评分
@@ -489,6 +517,7 @@ class AIAgentTradingStrategy(IStrategy):
                 analysis['openai_market_state'] = openai_trend
                 analysis['openai_recommendation'] = openai_action
                 analysis['openai_strength'] = openai_confidence
+                analysis['openai_error'] = ''
                 analysis['openai_full_analysis'] = ai_result.get('full_analysis', '')
                 analysis['openai_technical_score'] = ai_result.get('technical_score', 5.0)
                 analysis['openai_macro_score'] = ai_result.get('macro_score', 5.0)
@@ -506,6 +535,9 @@ class AIAgentTradingStrategy(IStrategy):
                 
         except Exception as e:
             logger.warning(f"OpenAI深度分析失败: {e}")
+            analysis['openai_used'] = False
+            analysis['openai_error'] = str(e)
+            analysis['openai_full_analysis'] = ''
         
         return analysis
 
@@ -842,24 +874,29 @@ AI建议: {latest['ai_action']}
 
 🌍 宏观经济分析 (真实数据)
 ------------------------------
-纳斯达克趋势: {latest['macro_nasdaq_trend']}
-美联储政策: {latest['macro_fed_sentiment']}
-VIX恐慌指数: {latest['macro_vix_level']:.1f}
-美元指数DXY: {latest['macro_dxy_index']:.1f}
-黄金价格: ${latest['macro_gold_price']:.0f}
-宏观经济得分: {latest['macro_score']:+.3f}
+纳斯达克趋势: {latest['macro_nasdaq_trend'] if latest['macro_nasdaq_trend'] is not None else 'N/A'}
+美联储政策: {latest['macro_fed_sentiment'] if latest['macro_fed_sentiment'] is not None else 'N/A'}
+VIX恐慌指数: {f"{latest['macro_vix_level']:.1f}" if pd.notna(latest['macro_vix_level']) else 'N/A'}
+美元指数DXY: {f"{latest['macro_dxy_index']:.1f}" if pd.notna(latest['macro_dxy_index']) else 'N/A'}
+黄金价格: {f"${latest['macro_gold_price']:.0f}" if pd.notna(latest['macro_gold_price']) else 'N/A'}
+宏观经济得分: {f"{latest['macro_score']:+.3f}" if pd.notna(latest['macro_score']) else 'N/A'}
 
 🤖 OpenAI深度分析
 ------------------------------
 """)
     if latest.get('openai_used', False):
+        print("本次OpenAI调用: 成功")
         print(f"市场状态: {latest['openai_market_state']}\nAI建议: {latest['openai_recommendation']}\n信心指数: {latest['openai_strength']*100:.1f}%\n技术面评分: {latest.get('openai_technical_score', 5.0):.1f}/10\n宏观面评分: {latest.get('openai_macro_score', 5.0):.1f}/10\n风险等级: {latest.get('openai_risk_level', 5)}/10级")
     else:
+        print("本次OpenAI调用: 未成功(已降级)")
         print("(跳过) OpenAI不可用或调用失败，已使用降级规则，不输出专业级分析块。")
+        failure_reason = str(latest.get('openai_error', '') or '').strip()
+        if failure_reason:
+            print(f"失败原因: {failure_reason}")
 
     # 显示OpenAI的详细分析过程（如果有）
     openai_analysis = latest.get('openai_full_analysis', '')
-    if openai_analysis and len(openai_analysis) > 100:
+    if latest.get('openai_used', False) and openai_analysis and len(openai_analysis) > 100:
         print(f"\n🔍 AI详细分析过程：")
         print("-" * 30)
         # 截取分析的前500个字符避免输出过长
