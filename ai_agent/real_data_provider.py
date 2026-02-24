@@ -387,9 +387,12 @@ class RealDataProvider:
         if self._is_cache_valid(cache_key, use_macro_cache=True):
             return self.macro_cache[cache_key]["data"]
 
-        use_yf = os.getenv("USE_YFINANCE", "1").lower() in ("1","true","yes") and yf is not None
+        # 默认关闭 yfinance 主路径，避免 Yahoo 429 导致长时间重试。
+        # 如需启用可设置 USE_YFINANCE=1
+        use_yf = os.getenv("USE_YFINANCE", "0").lower() in ("1","true","yes") and yf is not None
         allow_stooq = os.getenv("USE_STOOQ_FALLBACK", "1").lower() in ("1","true","yes")
-        prefer_alpha = os.getenv("PREFER_ALPHA_NASDAQ_PROXY", "0").lower() in ("1","true","yes")
+        prefer_alpha = os.getenv("PREFER_ALPHA_NASDAQ_PROXY", "1").lower() in ("1","true","yes")
+        disable_yahoo = os.getenv("DISABLE_YAHOO_ENDPOINTS", "1").lower() in ("1", "true", "yes")
 
         alpha_prefill: Dict[str, Any] = {}
         if prefer_alpha:
@@ -463,7 +466,7 @@ class RealDataProvider:
                 logger.warning(f"Stooq 回退异常: {e}")
 
         # 3) Yahoo 批量
-        if os.getenv("YAHOO_BATCH_MODE", "1").lower() in ("1","true","yes") and alpha_prefill.get("nasdaq_price") is None:
+        if (not disable_yahoo) and os.getenv("YAHOO_BATCH_MODE", "1").lower() in ("1","true","yes") and alpha_prefill.get("nasdaq_price") is None:
             try:
                 batch = await self._get_macro_batch()
                 if batch.get("nasdaq_price") is not None:
@@ -489,30 +492,38 @@ class RealDataProvider:
                 nasdaq_data = {"price": alpha_prefill.get("nasdaq_price"),
                                "change": alpha_prefill.get("nasdaq_change"),
                                "trend": alpha_prefill.get("nasdaq_trend")}
+            elif disable_yahoo:
+                nasdaq_data = {"price": None, "change": None, "trend": None}
             else:
                 nasdaq_data = await self._get_nasdaq_data(relaxed=True)  # relaxed 模式：失败不抛
 
             # Fed 数据 (允许跳过)
             skip_fed = os.getenv("SKIP_FED_ON_ERROR", "1").lower() in ("1","true","yes")
-            try:
-                fed_data = await self._get_fed_data()
-            except Exception as fe:
-                if skip_fed:
-                    logger.warning(f"Fed 数据获取失败(跳过): {fe}")
-                    fed_data = {"rate": None, "next_fomc": None, "sentiment": None}
-                else:
-                    raise
+            if disable_yahoo:
+                fed_data = {"rate": None, "next_fomc": None, "sentiment": None}
+            else:
+                try:
+                    fed_data = await self._get_fed_data()
+                except Exception as fe:
+                    if skip_fed:
+                        logger.warning(f"Fed 数据获取失败(跳过): {fe}")
+                        fed_data = {"rate": None, "next_fomc": None, "sentiment": None}
+                    else:
+                        raise
 
             # 指数 (DXY/VIX/Gold) 允许跳过
             skip_indices = os.getenv("SKIP_INDICES_ON_ERROR", "1").lower() in ("1","true","yes")
-            try:
-                indices_data = await self._get_financial_indices()
-            except Exception as ie:
-                if skip_indices:
-                    logger.warning(f"其它指数获取失败(跳过): {ie}")
-                    indices_data: Dict[str, Optional[float]] = {"dxy": None, "vix": None, "gold": None}
-                else:
-                    raise
+            if disable_yahoo:
+                indices_data = {"dxy": None, "vix": None, "gold": None}
+            else:
+                try:
+                    indices_data = await self._get_financial_indices()
+                except Exception as ie:
+                    if skip_indices:
+                        logger.warning(f"其它指数获取失败(跳过): {ie}")
+                        indices_data: Dict[str, Optional[float]] = {"dxy": None, "vix": None, "gold": None}
+                    else:
+                        raise
 
             cpi_data = await cpi_task
         except Exception as e:
@@ -1331,19 +1342,42 @@ class RealDataProvider:
     
     async def _get_cpi_data(self) -> Dict[str, Any]:
         """获取CPI数据"""
+        cpi_required = os.getenv("CPI_REQUIRED", "0").lower() in ("1", "true", "yes")
+        empty = {"current": None, "previous": None, "next_date": self._get_next_cpi_date()}
+
         if not self.news_client:
-            raise RuntimeError("缺少NewsAPI客户端, 无法获取CPI")
-        response = self.news_client.get_everything(
-            q="CPI inflation consumer price index",
-            from_param=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-            language='en',
-            sort_by='publishedAt',
-            page_size=10
-        )
-        if response['status'] != 'ok' or not response['articles']:
-            raise RuntimeError("无法获取CPI相关新闻")
-        latest_cpi = self._extract_cpi_from_news(response['articles'])
-        return {"current": latest_cpi.get("current"), "previous": latest_cpi.get("previous"), "next_date": self._get_next_cpi_date()}
+            msg = "缺少NewsAPI客户端, CPI按可选字段跳过"
+            if cpi_required:
+                raise RuntimeError(msg)
+            logger.warning(msg)
+            return empty
+
+        try:
+            response = self.news_client.get_everything(
+                q="CPI inflation consumer price index",
+                from_param=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+                language='en',
+                sort_by='publishedAt',
+                page_size=10
+            )
+            if response['status'] != 'ok' or not response['articles']:
+                msg = "无法获取CPI相关新闻，按可选字段跳过"
+                if cpi_required:
+                    raise RuntimeError(msg)
+                logger.warning(msg)
+                return empty
+
+            latest_cpi = self._extract_cpi_from_news(response['articles'])
+            return {
+                "current": latest_cpi.get("current"),
+                "previous": latest_cpi.get("previous"),
+                "next_date": self._get_next_cpi_date()
+            }
+        except Exception as e:
+            if cpi_required:
+                raise
+            logger.warning(f"CPI获取失败，按可选字段跳过: {e}")
+            return empty
     
     async def _get_financial_indices(self) -> Dict[str, Any]:
         """获取其他重要金融指数 (DXY / VIX / Gold) - 带重试/退避/多主机"""

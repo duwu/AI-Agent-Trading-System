@@ -135,7 +135,7 @@ class OpenAIAnalyzer:
         """综合分析 - 基于 openai>=1 的 chat.completions 接口，带降级"""
         # 仅当没有可用的 API Key 时直接降级
         if not self.is_available:
-            return self._fallback_analysis(data)
+            return self._fallback_analysis(data, reason="missing_api_key_or_disabled")
 
         try:
             prompt = self._create_analysis_prompt(data)
@@ -197,13 +197,14 @@ class OpenAIAnalyzer:
 
             if last_err:
                 logger.error(f"OpenAI全部尝试失败，使用降级分析: {last_err}")
+                return self._fallback_analysis(data, reason=str(last_err))
             else:
                 logger.warning("OpenAI返回空响应")
-            return self._fallback_analysis(data)
+                return self._fallback_analysis(data, reason="empty_response")
 
         except Exception as e:
             logger.error(f"OpenAI分析失败: {e}")
-            return self._fallback_analysis(data)
+            return self._fallback_analysis(data, reason=str(e))
 
     # ================= 新增通用聊天封装 =================
     def _chat(self, prompt: str, model: Optional[str] = None) -> str:
@@ -586,7 +587,7 @@ class OpenAIAnalyzer:
         
         return analysis
     
-    def _fallback_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _fallback_analysis(self, data: Dict[str, Any], reason: Optional[str] = None) -> Dict[str, Any]:
         """降级分析 - 基于规则的简单分析"""
         market_data = data.get('market', {})
         macro_data = data.get('macro_economic', {})
@@ -632,7 +633,8 @@ class OpenAIAnalyzer:
             "action": action,
             "confidence": confidence,
             "reasoning": f"基于规则分析，综合评分: {score:.2f}",
-            "analysis_type": "fallback"
+            "analysis_type": "fallback",
+            "openai_error": reason
         }
 
 # 全局分析器实例
