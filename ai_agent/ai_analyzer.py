@@ -635,7 +635,10 @@ class AIAgentAnalyzer:
             '5m': {'interval': '5m', 'limit': 200, 'name': '5分钟'},
             '15m': {'interval': '15m', 'limit': 200, 'name': '15分钟'},
             '1h': {'interval': '1h', 'limit': 200, 'name': '1小时'},
-            '4h': {'interval': '4h', 'limit': 200, 'name': '4小时'}
+            '2h': {'interval': '2h', 'limit': 200, 'name': '2小时'},
+            '4h': {'interval': '4h', 'limit': 200, 'name': '4小时'},
+            '1d': {'interval': '1d', 'limit': 200, 'name': '1天'},
+            '1w': {'interval': '1w', 'limit': 200, 'name': '1周'}
         }
         
         multi_data = {}
@@ -780,7 +783,15 @@ class AIAgentAnalyzer:
                 }
             
             # 加权计算综合得分 (长期时间框架权重更大)
-            weights = {'5m': 0.1, '15m': 0.2, '1h': 0.3, '4h': 0.4}
+            weights = {
+                '5m': 0.05,
+                '15m': 0.10,
+                '1h': 0.15,
+                '2h': 0.15,
+                '4h': 0.20,
+                '1d': 0.20,
+                '1w': 0.15,
+            }
             weighted_technical_score = 0
             total_weight = 0
             
