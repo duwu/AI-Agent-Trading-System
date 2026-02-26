@@ -9,6 +9,7 @@ import aiohttp
 import logging
 import json
 import os
+import requests
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
@@ -178,30 +179,46 @@ class EnhancedMacroProvider:
     
     async def _get_alternative_gold_data(self, session) -> Dict[str, Any]:
         """获取黄金价格数据"""
-        try:
-            # 使用PAX Gold (PAXG) 作为黄金价格参考
-            url = "https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT"
-            
-            async with session.get(url) as response:
-                if response.status == 200:
+        hosts = [h.strip() for h in os.getenv("BINANCE_HOSTS", "api.binance.com,api1.binance.com,api2.binance.com,api3.binance.com").split(',') if h.strip()]
+        path = "/api/v3/ticker/price?symbol=PAXGUSDT"
+        last_error: Optional[BaseException] = None
+
+        # 1) aiohttp 多主机尝试
+        for host in hosts:
+            url = f"https://{host}{path}"
+            try:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        last_error = RuntimeError(f"status={response.status} host={host}")
+                        continue
                     data = await response.json()
                     paxg_price = float(data['price'])
-                    
-                    # # PAXG代表1盎司黄金，但价格可能有溢价，需要调整到合理范围
-                    # # 正常黄金价格应该在1800-2200美元之间
-                    # if paxg_price > 2500:  # 价格过高，可能是代币价格
-                    #     estimated_gold = 2000 + (paxg_price - 2500) * 0.01  # 保守调整
-                    # else:
-                    #     estimated_gold = paxg_price
-                    
-                    # # 确保在合理范围内
-                    # estimated_gold = max(1800, min(2200, estimated_gold))
-                    
                     return {"value": round(paxg_price, 2)}
-                    
-        except Exception as e:
-            logger.warning(f"获取黄金替代数据失败: {e}")
-        
+            except asyncio.CancelledError as ce:
+                last_error = ce
+                logger.warning(f"PAXG aiohttp请求被取消 host={host}: {type(ce).__name__}")
+                continue
+            except Exception as e:
+                last_error = e
+                continue
+
+        # 2) requests 同步后备（部分Windows环境更稳定）
+        for host in hosts:
+            url = f"https://{host}{path}"
+            try:
+                resp = await asyncio.to_thread(requests.get, url, timeout=8)
+                if resp.status_code != 200:
+                    last_error = RuntimeError(f"requests_status={resp.status_code} host={host}")
+                    continue
+                data = resp.json()
+                paxg_price = float(data['price'])
+                logger.info(f"PAXG 使用 requests 后备成功 host={host}")
+                return {"value": round(paxg_price, 2)}
+            except Exception as e:
+                last_error = e
+                continue
+
+        logger.warning(f"获取黄金替代数据失败: {last_error}")
         return {}
     
     async def _get_alternative_dxy_data(self, session) -> Dict[str, Any]:
