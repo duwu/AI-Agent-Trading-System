@@ -41,7 +41,7 @@ class AIAgentTradingStrategy(IStrategy):
     AI Agent 集成交易策略 - 多时间框架分析版本
     
     功能特性：
-    1. 多时间框架技术分析 (5m, 15m, 1h, 4h)
+    1. 多时间框架技术分析 (5m, 15m, 1h, 2h, 4h, 1d, 1w)
     2. 集成新闻和社媒数据采集
     3. 先进的技术指标计算 (RSI, BOLL, MACD等)
     4. AI Agent自动分析市场信号
@@ -243,7 +243,7 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['macro_score'] = np.nan
         
         # 时间框架得分
-        for tf in ['5m', '15m', '1h', '4h']:
+        for tf in ['5m', '15m', '1h', '2h', '4h', '1d', '1w']:
             dataframe[f'tf_{tf}_score'] = 0.0
     
     def _add_multi_timeframe_analysis(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -357,7 +357,7 @@ class AIAgentTradingStrategy(IStrategy):
         dataframe['macro_score'] = macro_score
 
         timeframe_scores = analysis.get('timeframe_scores', {})
-        for tf in ['5m', '15m', '1h', '4h']:
+        for tf in ['5m', '15m', '1h', '2h', '4h', '1d', '1w']:
             dataframe[f'tf_{tf}_score'] = timeframe_scores.get(tf, 0.0)
 
         return dataframe
@@ -658,7 +658,10 @@ def _get_multi_timeframe_indicators(symbol='BTCUSDT'):
             '5m': '5m',
             '15m': '15m', 
             '1h': '1h',
-            '4h': '4h'
+            '2h': '2h',
+            '4h': '4h',
+            '1d': '1d',
+            '1w': '1w'
         }
         
         multi_indicators = {}
@@ -704,7 +707,7 @@ def _get_multi_timeframe_indicators(symbol='BTCUSDT'):
         
     except Exception as e:
         logger.error(f"获取多时间框架指标失败: {e}")
-        return {'5m': None, '15m': None, '1h': None, '4h': None}
+        return {'5m': None, '15m': None, '1h': None, '2h': None, '4h': None, '1d': None, '1w': None}
 
 
 def _calculate_timeframe_indicators(df):
@@ -870,7 +873,7 @@ def analyze_real_data(symbol='BTCUSDT'):
 AI建议: {latest['ai_action']}
 置信度: {latest['ai_confidence']*100:.1f}%
 风险等级: {latest['ai_risk_level']*100:.1f}%
-有效时间框架: {latest['valid_timeframes']}/4
+有效时间框架: {latest['valid_timeframes']}/7
 
 🌍 宏观经济分析 (真实数据)
 ------------------------------
@@ -969,7 +972,7 @@ MACD信号: {latest['macdsignal']:.4f}
 📊 多时间框架得分 (基于真实数据):
 ------------------------------""")
     
-    for tf in ['5m', '15m', '1h', '4h']:
+    for tf in ['5m', '15m', '1h', '2h', '4h', '1d', '1w']:
         score = _to_float(latest.get(f'tf_{tf}_score', 0.0), 0.0)
         if score > 0.2:
             signal = "看涨🟢"
@@ -1062,8 +1065,43 @@ MACD信号: {latest['macdsignal']:.4f}
 🔮 综合建议
 ------------------------------""")
 
-    # 持仓操作建议 - 与信号一致
+    # 统一最终结论口径：优先参考OpenAI建议；若与量化信号冲突则明确提示“信号分歧”
+    openai_side = 'HOLD'
+    if latest.get('openai_used', False):
+        openai_rec = str(latest.get('openai_recommendation', '') or '').strip().lower()
+        if openai_rec in ('买入', 'buy', 'long'):
+            openai_side = 'LONG'
+        elif openai_rec in ('卖出', 'sell', 'short'):
+            openai_side = 'SHORT'
+
+    quant_side = 'FLAT'
     if exit_long_sig == 1 or exit_short_sig == 1:
+        quant_side = 'EXIT'
+    elif enter_long_sig == 1:
+        quant_side = 'LONG'
+    elif enter_short_sig == 1:
+        quant_side = 'SHORT'
+
+    side_conflict = (
+        openai_side in ('LONG', 'SHORT') and (
+            quant_side in ('EXIT', 'FLAT') or quant_side != openai_side
+        )
+    )
+
+    # 持仓操作建议 - 与信号一致
+    if openai_side == 'LONG':
+        print("\n📦 持仓建议\n------------------------------")
+        if side_conflict:
+            print("偏多思路：等待回调分批建仓；当前量化信号未完全确认，先小仓位试探")
+        else:
+            print("偏多思路：按回调分批买入，严格执行止损")
+    elif openai_side == 'SHORT':
+        print("\n📦 持仓建议\n------------------------------")
+        if side_conflict:
+            print("偏空思路：等待反弹分批减仓/试空；当前量化信号未完全确认，先控制仓位")
+        else:
+            print("偏空思路：以反弹减仓或逢高试空为主，严格控制风险")
+    elif exit_long_sig == 1 or exit_short_sig == 1:
         print("\n📦 持仓建议\n------------------------------")
         if combined_score < -0.3:
             print("建议减仓或清仓，优先保护收益/控制亏损")
@@ -1078,6 +1116,16 @@ MACD信号: {latest['macdsignal']:.4f}
         print("🚫 数据不足 - 暂停交易，等待数据完善")
     elif confidence < 0.3:
         print("🤔 信号不明确 - 建议观望，等待更清晰信号")
+    elif openai_side == 'LONG':
+        if side_conflict:
+            print("⚖️ 信号分歧 - OpenAI偏多，但量化信号未确认；等待回调区间再小仓位分批买入")
+        else:
+            print("📈 偏多一致 - 回调分批买入，严格止损")
+    elif openai_side == 'SHORT':
+        if side_conflict:
+            print("⚖️ 信号分歧 - OpenAI偏空，但量化信号未确认；以防守为主，反弹减仓")
+        else:
+            print("📉 偏空一致 - 以反弹减仓/逢高试空为主")
     elif exit_long_sig == 1 or exit_short_sig == 1:
         if combined_score < -0.3:
             print("📉 强烈看跌 - 考虑减仓或止盈")
