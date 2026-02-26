@@ -651,6 +651,9 @@ class RealDataProvider:
                 data = await provider._get_alternative_gold_data(session)  # type: ignore[attr-defined]
                 if isinstance(data, dict) and data.get("value") is not None:
                     return float(data["value"])  # PAXGUSDT 实时价格
+        except asyncio.CancelledError as ce:
+            logger.warning(f"_alt_gold_via_binance 请求被取消，降级为空: {type(ce).__name__}")
+            return None
         except Exception as e:
             logger.debug(f"_alt_gold_via_binance 失败: {e}")
         return None
@@ -676,8 +679,9 @@ class RealDataProvider:
         """使用 Alpha Vantage 获取所需字段 (纳指代理 QQQ、Fed、CPI 及 ETF 指数代理)。"""
         if os.getenv("USE_ALPHA_VANTAGE", "1").lower() not in ("1","true","yes"):
             return {}
-        api_key = os.getenv("ALPHAVANTAGE_API_KEY", "").strip() or os.getenv("ALPHAVANTAGE_API_KEY", "FBXGVQXZ2XIQKYDV").strip()
+        api_key = os.getenv("ALPHAVANTAGE_API_KEY", "").strip()
         if not api_key:
+            logger.warning("ALPHAVANTAGE_API_KEY 未设置，跳过 AlphaVantage 补充数据")
             return {}
         base = "https://www.alphavantage.co/query"
         out: Dict[str, Any] = {}
@@ -924,13 +928,13 @@ class RealDataProvider:
             if dxy_price is None:
                 dxy_price = await self._fetch_stooq_price(["dx.f"])  # 美元指数
             if vix_price is None:
-                vix_price = await self._fetch_stooq_price(["^vix", "vix.us"])
+                vix_price = await self._fetch_stooq_price(["vixy.us", "^vix", "vix.us"])
             if gold_price is None:
                 gold_price = await self._fetch_stooq_price(["gc.f", "xauusd"])
             if fed_rate is None:
                 fed_rate = await self._fetch_stooq_price(["^ust10y", "ust10y.us"])  # 10Y收益率
             if nasdaq_price is None:
-                nasdaq_price = await self._fetch_stooq_price(["^ixic", "ixic.us"])  # 纳指
+                nasdaq_price = await self._fetch_stooq_price(["^ndx", "^ixic", "ixic.us"])  # 纳指
 
         # 继续获取 CPI 与 FOMC
         cpi_data = await self._get_cpi_data()
@@ -954,23 +958,46 @@ class RealDataProvider:
     async def _fetch_stooq_price(self, candidates: List[str]) -> Optional[float]:
         """从 Stooq CSV 获取最新收盘价，按候选列表顺序尝试。"""
         timeout = aiohttp.ClientTimeout(total=float(os.getenv("STOOQ_TIMEOUT", "6")))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/csv,text/plain,*/*",
+        }
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for code in candidates:
-                url = f"https://stooq.com/q/d/l/?s={code}&i=d"
                 try:
-                    async with session.get(url) as resp:
-                        if resp.status != 200:
+                    # 1) 优先实时报价端点（在部分网络环境下比 d/l 更稳定）
+                    quote_url = f"https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=csv"
+                    async with session.get(quote_url, headers=headers) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            lines = [l for l in text.strip().splitlines() if l]
+                            if lines:
+                                # 典型格式: SYMBOL,DATE,TIME,OPEN,HIGH,LOW,CLOSE,VOLUME
+                                row = lines[-1].split(',')
+                                if len(row) >= 7:
+                                    close_val = row[6]
+                                    try:
+                                        price = float(close_val)
+                                        logger.info(f"Stooq 报价端点获取 {code} 成功: {price}")
+                                        return price
+                                    except ValueError:
+                                        pass
+
+                    # 2) 回退历史日线端点
+                    hist_url = f"https://stooq.com/q/d/l/?s={code}&i=d"
+                    async with session.get(hist_url, headers=headers) as resp2:
+                        if resp2.status != 200:
                             continue
-                        text = await resp.text()
-                        lines = [l for l in text.strip().splitlines() if l]
-                        if len(lines) < 2:
+                        text2 = await resp2.text()
+                        lines2 = [l for l in text2.strip().splitlines() if l]
+                        if len(lines2) < 2:
                             continue
-                        last = lines[-1].split(',')
+                        last = lines2[-1].split(',')
                         if len(last) >= 5:
                             close_val = last[4]
                             try:
                                 price = float(close_val)
-                                logger.info(f"Stooq 获取 {code} 成功: {price}")
+                                logger.info(f"Stooq 历史端点获取 {code} 成功: {price}")
                                 return price
                             except ValueError:
                                 continue
@@ -980,32 +1007,50 @@ class RealDataProvider:
 
     async def _get_macro_via_stooq(self) -> Dict[str, Any]:
         """使用 Stooq 获取全部宏观指数 (并发+单会话)，计算纳指趋势。"""
-        nasdaq_codes = ["^ixic", "ixic.us"]
+        nasdaq_codes = ["^ndx", "^ixic", "ixic.us"]
         dxy_codes = ["dx.f", "dxy.us"]
-        vix_codes = ["^vix", "vix.us"]
+        vix_codes = ["vixy.us", "^vix", "vix.us"]
         gold_codes = ["gc.f", "xauusd"]
         tnx_codes = ["^ust10y", "ust10y.us", "us10y.us"]
 
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/csv,text/plain,*/*",
+        }
+
         async def fetch_closes(session: aiohttp.ClientSession, code: str) -> Optional[List[float]]:
-            url = f"https://stooq.com/q/d/l/?s={code}&i=d"
             try:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        return None
-                    text = await resp.text()
-                    lines = [l for l in text.strip().splitlines() if l]
-                    if len(lines) < 3:
-                        return None
-                    rows = [r.split(',') for r in lines[1:]]
-                    closes: List[float] = []
-                    for r in rows:
-                        if len(r) >= 5:
-                            try:
-                                closes.append(float(r[4]))
-                            except ValueError:
-                                continue
-                    if len(closes) >= 2:
-                        return closes[-2:]
+                # 1) 历史端点（可计算涨跌）
+                url = f"https://stooq.com/q/d/l/?s={code}&i=d"
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        lines = [l for l in text.strip().splitlines() if l]
+                        if len(lines) >= 3:
+                            rows = [r.split(',') for r in lines[1:]]
+                            closes: List[float] = []
+                            for r in rows:
+                                if len(r) >= 5:
+                                    try:
+                                        closes.append(float(r[4]))
+                                    except ValueError:
+                                        continue
+                            if len(closes) >= 2:
+                                return closes[-2:]
+
+                # 2) 报价端点（至少拿到当前值）
+                quote_url = f"https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=csv"
+                async with session.get(quote_url, headers=headers) as resp2:
+                    if resp2.status == 200:
+                        text2 = await resp2.text()
+                        lines2 = [l for l in text2.strip().splitlines() if l]
+                        if lines2:
+                            row = lines2[-1].split(',')
+                            if len(row) >= 7:
+                                try:
+                                    return [float(row[6])]
+                                except ValueError:
+                                    return None
             except Exception:
                 return None
             return None
@@ -1026,10 +1071,19 @@ class RealDataProvider:
                 pick_group(gold_codes, session),
                 pick_group(tnx_codes, session)
             )
+
+            # 二次兜底：若历史/报价序列均失败，尝试通用价格抓取（可返回单点价格）
+            if not nasdaq_closes:
+                nasdaq_spot = await self._fetch_stooq_price(nasdaq_codes)
+                if nasdaq_spot is not None:
+                    nasdaq_closes = [nasdaq_spot]
+
             from typing import Tuple
             def compute_change(closes: Optional[List[float]]) -> Tuple[Optional[float], Optional[float], Optional[str]]:
                 if not closes:
                     return None, None, None
+                if len(closes) == 1:
+                    return closes[-1], None, None
                 price = closes[-1]
                 prev = closes[0]
                 change = (price - prev) / prev * 100 if prev else 0.0
