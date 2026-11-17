@@ -1,19 +1,49 @@
 
 """
-OpenAI分析器 - openai>=1 统一实现
-统一使用 OpenAI(...).chat.completions.create，并支持自定义 base_url 与模型。
+OpenAI分析器
+
+目标：将“官方 OpenAI”和“代理 OpenAI”定义为相同接口的两种实现，默认使用代理实现。
+
+说明：
+- 定义 IOpenAIAnalyzer 接口（Protocol）。
+- BaseOpenAIAnalyzer 提供通用能力。（原 OpenAIAnalyzer 的实现迁移至此）
+- ProxyOpenAIAnalyzer/OfficialOpenAIAnalyzer 作为两种实现，仅在默认 base_url/传输偏好上有所差异。
+- 工厂 get_openai_analyzer 默认返回代理实现，可通过环境变量 OPENAI_PROVIDER=official 切换。
 """
 
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Protocol, runtime_checkable
 import json
 import logging
 import os
+import re
+import time
 import requests
 
 logger = logging.getLogger(__name__)
 
-class OpenAIAnalyzer:
+
+class AIStreamError(RuntimeError):
+    """A sanitized error delivered after HTTP 200 by an upstream SSE gateway."""
+
+    def __init__(self, error):
+        error = error if isinstance(error, dict) else {}
+        self.error_type = re.sub(r"[^a-zA-Z0-9_.-]", "", str(error.get("type", "unknown")))[:80]
+        self.code = re.sub(r"[^a-zA-Z0-9_.-]", "", str(error.get("code", "unknown")))[:80]
+        self.retryable = self.error_type not in ("authentication_error", "invalid_request_error", "permission_error") and self.code not in ("401", "403", "insufficient_quota", "invalid_api_key")
+        super().__init__(f"AI 流错误: type={self.error_type}, code={self.code}")
+
+@runtime_checkable
+class IOpenAIAnalyzer(Protocol):
+    def test_connection(self) -> bool: ...
+    def get_status(self) -> Dict[str, Any]: ...
+    async def analyze_comprehensive(self, data: Dict[str, Any]) -> Dict[str, Any]: ...
+    def analyze_market_context(self, symbol: str, price_data: Dict[str, Any], technical_indicators: Dict[str, Any]) -> Dict[str, Any]: ...
+    def analyze_news_sentiment_advanced(self, headlines: list[str], symbol: str) -> Dict[str, Any]: ...
+    def generate_trading_insights(self, symbol: str, context: Dict[str, Any]) -> Dict[str, Any]: ...
+
+
+class BaseOpenAIAnalyzer:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         # 确保加载环境变量
         from dotenv import load_dotenv
@@ -21,20 +51,26 @@ class OpenAIAnalyzer:
 
         # 从环境读取配置
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://jeniya.cn/v1")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://openai945.cn/v1")
         # 模型优先级：ENV -> 合理默认
         self.model = os.getenv("OPENAI_MODEL", os.getenv("OPENAI_CHAT_MODEL", "gpt-5"))
 
         self.client = None
         # 懒初始化：只要有 key 就标记可用；调用时报错再降级
         self.is_available = bool(self.api_key)
-        # 传输优先级：sdk | http（某些代理更兼容 http）
+        # 提供方：official | proxy（默认根据 base_url 自动判定，可被环境覆盖）
+        provider_env = os.getenv("OPENAI_PROVIDER", "").lower()
+        if provider_env in ("official", "proxy"):
+            self.provider = provider_env
+        else:
+            self.provider = "official" if (self.base_url and "api.openai.com" in self.base_url) else "proxy"
+        # 传输优先级：sdk | http（代理强制 http）
         self.transport = os.getenv("OPENAI_PREFERRED_TRANSPORT", "sdk").lower()
         # 温度策略：默认不下发（多数代理默认=1 且不接受自定义）
         self.temperature_env = os.getenv("OPENAI_TEMPERATURE")
         self.send_temperature = os.getenv("OPENAI_SEND_TEMPERATURE", "false").lower() in ("1", "true", "yes")
-        # 如果是自定义代理（非官方），默认优先使用 http
-        if self.base_url and "api.openai.com" not in self.base_url and os.getenv("OPENAI_PREFERRED_TRANSPORT") is None:
+        # 如果是代理或非官方 base_url，且未显式指定 PREFERRED_TRANSPORT，则强制 http
+        if self.provider == "proxy" or (self.base_url and "api.openai.com" not in self.base_url and os.getenv("OPENAI_PREFERRED_TRANSPORT") is None):
             self.transport = "http"
 
         # 初始化新版 OpenAI 客户端（openai>=1）
@@ -42,6 +78,12 @@ class OpenAIAnalyzer:
 
     def _initialize_client(self):
         """安全初始化 OpenAI 客户端（openai>=1）"""
+        # 代理模式：完全跳过 SDK，使用 HTTP
+        if self.provider == "proxy":
+            if not self.is_available:
+                logger.warning("OpenAI API密钥未设置（代理模式），仅可用降级分析")
+            logger.info("OpenAI 代理模式启用：仅使用 HTTP /chat/completions，不初始化 SDK 客户端")
+            return
         if not self.is_available:
             logger.warning("OpenAI API密钥未设置，跳过初始化")
             return
@@ -106,11 +148,25 @@ class OpenAIAnalyzer:
     
     def test_connection(self) -> bool:
         """测试OpenAI连接"""
-        if not self.is_available or not self.client:
+        if not self.is_available:
             return False
-
+        # 代理：使用 HTTP 直测
+        if self.provider == "proxy":
+            try:
+                txt = self._http_chat_completion("ping", self.model)
+                ok = bool(txt is not None)
+                if ok:
+                    logger.info("OpenAI(代理)连接测试成功")
+                else:
+                    logger.warning("OpenAI(代理)连接测试返回空")
+                return ok
+            except Exception as e:
+                logger.error(f"OpenAI(代理)连接测试失败: {e}")
+                return False
+        # 官方：走 SDK
+        if self.client is None:
+            return False
         try:
-            # 尝试一个简单的调用（新版API）
             _ = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "ping"}],
@@ -145,14 +201,18 @@ class OpenAIAnalyzer:
                 candidates.append(self.model)
             candidates += ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-3.5-turbo"]
 
-            # 若偏好 http 或 SDK 客户端未初始化，则优先走 http
-            if self.transport == "http" or self.client is None:
+            # 若为代理或偏好 http 或 SDK 客户端未初始化，则优先走 http
+            if self.provider == "proxy" or self.transport == "http" or self.client is None:
                 try:
                     http_text = self._http_chat_completion(prompt, candidates[0] if candidates else self.model)
                     if http_text:
                         logger.info("OpenAI HTTP优先通道成功")
                         return self._parse_ai_response(http_text)
                 except Exception as e_http_first:
+                    if self.provider == "proxy":
+                        # 代理模式不尝试 SDK，直接降级
+                        logger.warning(f"HTTP通道失败（代理模式），不回退SDK: {e_http_first}")
+                        return self._fallback_analysis(data)
                     logger.warning(f"HTTP优先通道失败，回退SDK: {e_http_first}")
 
             last_err = None
@@ -215,6 +275,9 @@ class OpenAIAnalyzer:
             return self._http_chat_completion(prompt, model_to_use) or ""
         except Exception as e:
             last_err = e
+        # 代理模式不进行 SDK 回退
+        if self.provider == "proxy":
+            raise RuntimeError(f"HTTP调用失败（代理模式不回退SDK）: {last_err}")
         # SDK fallback strictly (仅在存在client时)
         if self.client is not None:
             try:
@@ -313,7 +376,48 @@ class OpenAIAnalyzer:
     
     # 注意：已在上方提供 test_connection 的实现，这里移除重复定义
 
-    def _http_chat_completion(self, prompt: str, model: Optional[str]) -> Optional[str]:
+    def request_chat_completion(self, prompt: str, reasoning_effort: Optional[str] = None) -> str:
+        """返回真实模型文本；错误显式上抛，不将规则结果当作 AI 输出。"""
+        if not self.is_available:
+            raise RuntimeError("OPENAI_API_KEY 未设置")
+        text = self._http_chat_completion(prompt, self.model, reasoning_effort=reasoning_effort)
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("AI 接口返回空内容")
+        return text
+
+    @staticmethod
+    def _read_chat_stream(response, deadline=None) -> str:
+        """读取兼容 OpenAI 的 SSE，只拼接最终回答，不暴露推理字段。"""
+        pieces = []
+        finished = False
+        for line in response.iter_lines():
+            if deadline is not None and time.monotonic() > deadline:
+                raise requests.ReadTimeout("AI stream exceeded total deadline")
+            line = line.decode("utf-8") if isinstance(line, bytes) else line
+            if not line or not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                finished = True
+                break
+            chunk = json.loads(payload)
+            if chunk.get("error"):
+                raise AIStreamError(chunk["error"])
+            for choice in chunk.get("choices", []):
+                content = (choice.get("delta") or {}).get("content")
+                if isinstance(content, str):
+                    pieces.append(content)
+                finish = choice.get("finish_reason")
+                if finish:
+                    if finish != "stop":
+                        raise RuntimeError(f"AI 输出未正常完成: {finish}")
+                    finished = True
+        if not finished:
+            # An interrupted stream is never treated as a complete trade plan.
+            raise requests.ConnectionError("AI stream ended before completion")
+        return "".join(pieces)
+
+    def _http_chat_completion(self, prompt: str, model: Optional[str], reasoning_effort: Optional[str] = None) -> Optional[str]:
         """直接通过 HTTP 调用 /chat/completions，兼容第三方代理差异"""
         base_url = self.base_url.rstrip('/')
         url = f"{base_url}/chat/completions"
@@ -327,6 +431,13 @@ class OpenAIAnalyzer:
             "model": model or self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
+        effort = reasoning_effort or os.getenv("OPENAI_REASONING_EFFORT")
+        if effort:
+            base_payload["reasoning_effort"] = effort
+        streaming = os.getenv("OPENAI_STREAM", "true").lower() in ("1", "true", "yes")
+        if streaming:
+            base_payload["stream"] = True
+            headers["Accept"] = "text/event-stream"
         # 默认不下发温度（让代理使用默认=1）；如显式开启，则先用自定义，再尝试不下发和1.0
         try_temps = [None]
         if self.send_temperature and self.temperature_env:
@@ -334,30 +445,58 @@ class OpenAIAnalyzer:
                 try_temps = [float(self.temperature_env), None, 1.0]
             except Exception:
                 try_temps = [None, 1.0]
-        last_exc = None
+        read_timeout = float(os.getenv("OPENAI_READ_TIMEOUT", "180"))
+        retries = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+        if not 1 <= read_timeout <= 600 or not 0 <= retries <= 3:
+            raise ValueError("OPENAI_READ_TIMEOUT 须在 1–600 秒，OPENAI_MAX_RETRIES 须在 0–3")
         data = None
-        for t in try_temps:
-            try:
-                payload = dict(base_payload)
-                if t is not None:
-                    payload["temperature"] = t
-                # 更宽松的超时 (connect, read)
-                resp = requests.post(url, headers=headers, json=payload, timeout=(10, 60))
-                resp.raise_for_status()
-                data = resp.json()
+        for temperature in try_temps:
+            payload = dict(base_payload)
+            if temperature is not None:
+                payload["temperature"] = temperature
+            for attempt in range(retries + 1):
+                resp = None
+                try:
+                    deadline = time.monotonic() + read_timeout
+                    resp = requests.post(url, headers=headers, json=payload, timeout=(10, read_timeout), stream=streaming)
+                    if (resp.status_code in (408, 429) or resp.status_code >= 500) and attempt < retries:
+                        logger.warning("AI HTTP %s，重试 %s/%s", resp.status_code, attempt + 1, retries)
+                        time.sleep(2 ** attempt)
+                        continue
+                    if resp.status_code == 400 and temperature is not None:
+                        break
+                    if not resp.ok:
+                        raise RuntimeError(f"AI 接口 HTTP {resp.status_code}")
+                    if streaming and "text/event-stream" in resp.headers.get("Content-Type", "").lower():
+                        return self._read_chat_stream(resp, deadline=deadline)
+                    data = resp.json()
+                    break
+                except AIStreamError as exc:
+                    if not exc.retryable or attempt == retries:
+                        raise
+                    logger.warning("%s，重试 %s/%s", exc, attempt + 1, retries)
+                    time.sleep(2 ** attempt)
+                    continue
+                except (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+                    if attempt == retries:
+                        raise RuntimeError(f"AI 请求失败: {type(exc).__name__}，已尝试 {attempt + 1} 次") from exc
+                    logger.warning("AI 网络请求失败，重试 %s/%s", attempt + 1, retries)
+                    time.sleep(2 ** attempt)
+                    continue
+                finally:
+                    if resp is not None:
+                        resp.close()
+            if data is not None:
                 break
-            except Exception as e:
-                last_exc = e
-                continue
-        if data is None:
-            if last_exc:
-                raise last_exc
-            raise RuntimeError("HTTP fallback failed with unknown error")
+        if not isinstance(data, dict):
+            raise RuntimeError("AI 接口未返回 JSON 对象")
         choices = data.get("choices", []) or []
         if not choices:
-            logger.warning(f"HTTP后备返回无choices: {data}")
+            logger.warning("AI 接口未返回 choices")
             return None
         msg = choices[0].get("message") or {}
+        if choices[0].get("finish_reason") not in (None, "stop"):
+            raise RuntimeError(f"AI 输出未正常完成: {choices[0]['finish_reason']}")
         return msg.get("content")
     
     def _create_analysis_prompt(self, data: Dict[str, Any]) -> str:
@@ -636,31 +775,69 @@ class OpenAIAnalyzer:
         }
 
 # 全局分析器实例
-_global_analyzer = None
-
-def get_openai_analyzer(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenAIAnalyzer:
-    """获取OpenAI分析器实例（单例模式）"""
-    global _global_analyzer
-    
-    if _global_analyzer is None:
-        # 从环境变量或配置中获取默认值
-        if api_key is None:
-            import os
-            api_key = os.getenv("OPENAI_API_KEY", "")
-        
+class ProxyOpenAIAnalyzer(BaseOpenAIAnalyzer):
+    """代理实现：
+    - 默认 base_url 取 OPENAI_PROXY_BASE_URL 或 OPENAI_BASE_URL，回退 https://openai945.cn/v1
+    - 默认偏好 HTTP（除非显式设置 OPENAI_PREFERRED_TRANSPORT）
+    """
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+        from dotenv import load_dotenv
+        load_dotenv()
         if base_url is None:
-            import os
-            base_url = os.getenv("OPENAI_BASE_URL", "https://jeniya.cn/v1")
-        
-        _global_analyzer = OpenAIAnalyzer(api_key=api_key, base_url=base_url)
-        logger.info(f"Created OpenAI analyzer instance: available={_global_analyzer.is_available}")
-    
+            base_url = os.getenv("OPENAI_PROXY_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://openai945.cn/v1")
+        super().__init__(api_key=api_key, base_url=base_url)
+        if os.getenv("OPENAI_PREFERRED_TRANSPORT") is None:
+            self.transport = "http"
+
+
+class OfficialOpenAIAnalyzer(BaseOpenAIAnalyzer):
+    """官方实现：
+    - 默认 base_url 使用 https://api.openai.com/v1
+    - 默认偏好 SDK（除非显式设置 OPENAI_PREFERRED_TRANSPORT）
+    """
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+        if base_url is None:
+            base_url = os.getenv("OPENAI_OFFICIAL_BASE_URL", "https://api.openai.com/v1")
+        super().__init__(api_key=api_key, base_url=base_url)
+        if os.getenv("OPENAI_PREFERRED_TRANSPORT") is None:
+            self.transport = "sdk"
+
+
+_global_analyzer: Optional[IOpenAIAnalyzer] = None
+_global_provider: Optional[str] = None
+
+def get_openai_analyzer(api_key: Optional[str] = None,
+                        base_url: Optional[str] = None,
+                        provider: Optional[str] = None) -> IOpenAIAnalyzer:
+    """获取OpenAI分析器实例（单例模式）
+    provider: "proxy"(默认) | "official"
+    """
+    global _global_analyzer, _global_provider
+
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    if provider is None:
+        provider = os.getenv("OPENAI_PROVIDER", "proxy").lower()
+
+    # 如果单例不存在或 provider 改变，则重新创建
+    if _global_analyzer is None or _global_provider != provider:
+        if api_key is None:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+        if provider == "official":
+            instance: IOpenAIAnalyzer = OfficialOpenAIAnalyzer(api_key=api_key, base_url=base_url)
+        else:
+            instance: IOpenAIAnalyzer = ProxyOpenAIAnalyzer(api_key=api_key, base_url=base_url)
+        _global_analyzer = instance
+        _global_provider = provider
+        logger.info(f"Created OpenAI analyzer instance provider={provider}, available={getattr(_global_analyzer, 'is_available', False)}")
+
     return _global_analyzer
 
 # 测试函数
 async def test_analyzer():
     """测试分析器功能"""
-    analyzer = OpenAIAnalyzer(api_key="sk-test")
+    analyzer: IOpenAIAnalyzer = ProxyOpenAIAnalyzer(api_key="sk-test")
     
     test_data = {
         'market': {

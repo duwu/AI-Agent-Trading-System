@@ -1,256 +1,94 @@
-# AI Agent Trading System 使用指南
+# OKX 多资产 AI 决策系统
 
-> 本项目为多时间框架 + 宏观数据 + OpenAI 深度分析的加密货币智能交易/分析系统，支持现货与合约（做多/做空）信号。  
-> 仅供学习研究，不构成投资建议。请勿提交任何真实密钥到仓库。
+对比 BTC、XAUT、XSOXS、XSOXL、CL 的最新 OKX 行情与近期资讯，分析未来 **1–3 天**优先关注的资产和方向，并给出条件入场、止损、止盈及资讯引用。支持全部观望。当前产物是终端报告、Markdown 报告和 JSON 数据快照。
 
----
+## 快速运行
 
-## 🚀 特性概览
-
-- 多时间框架技术分析：5m / 15m / 1h / 4h
-- 自适应合约方向信号：做多 / 做空 / 观望
-- OpenAI 深度分析：目标价 / 止损 / 加仓参考（通过第三方代理支持自定义 Base URL）
-- 宏观经济模块：纳斯达克趋势 / 美联储政策 / VIX / DXY / 黄金
-- 智能风险评估：动态仓位建议（现货或合约可自适应）
-- 多源情感融合：技术 + 情感 + 宏观 + AI 建议
-- 自动降级机制：AI失败→规则分析仍可运行
-- 结构清晰：策略、数据提供、AI分析、启动脚本分离
-- 支持长/短方向统一风险逻辑（可扩展止盈追踪）
-
----
-
-## 📂 目录结构
-
-```
-ai_agent_trading_system/
-├── start.py                               # 统一入口（多模式）
-├── demo.py                                # 原型演示/实验
-├── simple_ai_strategy.py                  # 简化版分析脚本
-├── strategies/
-│   └── AIAgentTradingStrategy_MultiTimeframe.py   # 主策略（含多空/多时间框架/宏观/AI）
-├── ai_agent/
-│   ├── ai_analyzer.py                     # 综合技术+情感分析
-│   ├── real_data_provider.py              # 实时与宏观数据获取
-│   ├── openai_analyzer.py                 # OpenAI/代理通道 + JSON解析
-│   └── utils.py                           # 工具/安全转换
-├── docs/
-│   └── AI_AGENT_GUIDE.md                  # 使用指南
-├── requirements.txt
-└── .env.example                           # 环境变量模板（请自行创建）
+```bash
+# Python 3.11+；新分析入口仅需这两个轻量依赖
+python -m pip install -r requirements-analysis.txt
+# 已有 .env 时直接使用，不要覆盖
+# 首次配置：cp .env.example .env，填写 OPENAI_API_KEY
+python start.py
 ```
 
----
+默认分析全部五个资产；OKX 行情使用公开接口，无需交易所账户密钥。
 
-## 🧩 运行模式
-
-| 模式            | 命令示例                                                        | 说明 |
-|-----------------|-----------------------------------------------------------------|------|
-| 演示（demo）    | `python start.py --mode demo`                                   | 演示逻辑 |
-| 简化分析        | `python start.py --mode simple`                                 | 仅分析输出 |
-| 策略测试        | `python start.py --mode strategy`                               | 模拟/本地策略逻辑 |
-| 实盘数据分析    | `python start.py --mode real --symbol BTCUSDT`                  | 拉取真实K线并输出报告 |
-| 集成测试        | `python start.py --mode test`                                   | 自检流程 |
-
-默认 symbol 可用：`BTCUSDT` / `ETHUSDT` 等（需与交易所 API 一致，无斜杠）。
-
----
-
-## 🔐 环境变量 (.env)
-
-> 请复制 `.env.example` 自行创建 `.env`；不要把真实密钥提交到 Git。
-
+```bash
+python start.py --assets BTC,XAUT,CL          # 指定候选集合
+python start.py --collect-only               # 只采集行情与资讯
+python start.py --config config/okx_assets.json
+python start.py --output-dir results
 ```
-# Binance（若仅做公开分析，可留空）
-BINANCE_API_KEY=
-BINANCE_SECRET_KEY=
 
-# OpenAI / 第三方代理
-OPENAI_API_KEY=你的代理Key
-OPENAI_BASE_URL=https://jeniya.cn/v1
-OPENAI_MODEL=gpt-5-nano-2025-08-07
-# 强制使用HTTP直连后备（建议开启以适配中转）
-OPENAI_PREFERRED_TRANSPORT=http
-# 一些代理模型仅支持默认温度=1，设置 false 避免报错
+报告写入 `results/okx_时间戳.md` 和同名 `.json`。JSON 包含配置、行情/指标、新闻来源、模型原文、校验后的结论、错误和时间戳。该目录已被 Git 忽略。每次运行是一次快照分析，完成后退出；刷新判断请重新运行。
+
+## 资产和方向
+
+| 资产 | 优先使用的 OKX 品种 | 允许方向 | 实际敞口 |
+|---|---|---|---|
+| BTC | `BTC-USDT-SWAP`，不可用时查 `BTC-USDT` | 永续多空；现货买入/观望 | 比特币 |
+| XAUT | `XAUT-USDT` | 买入/观望 | 黄金代币 |
+| XSOXS | `XSOXS-USDT` | 买入/观望 | SOXS 半导体反向杠杆ETF |
+| XSOXL | `XSOXL-USDT` | 买入/观望 | SOXL 半导体同向杠杆ETF |
+| CL | `CL-USDT-SWAP` | 多空/观望 | WTI 原油永续 |
+
+买入 XSOXS 代表半导体看跌敞口，买入 XSOXL 代表半导体看涨敞口。报告里的 `long` 指买入所列品种；不会把“买入反向品种”写成“底层行业看涨”。SOXS/SOXL 的约 3 倍是每日目标，跨日存在重置与路径依赖，不等于持有期固定三倍回报。这两个候选是相反方向的选择，排名不表示同时持仓的投资组合。
+
+品种必须精确命中 OKX 当前挂牌目录并处于 `live` 状态；不对现货假定可借币做空，不将 XAUT 自动替换成 XAU 合约。这里只校验公开市场支持的产品方向，实际账户权限、地区可用性和持仓模式未接入。
+
+产品映射来源：[OKX XSOXS 资料](https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=XSOXS)、[XSOXL 资料](https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=XSOXL)、[CL 资料](https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=CL)。股票类品种可连续报价，但流动性受底层美股时段影响，代币价格不自动等于底层最新净值。
+
+## 从数据到结论
+
+1. **OKX 行情**：获取最新价、买卖价差、24h 变动与成交额、永续资金费率。使用已完成的 15m / 1H / 4H K线计算 RSI、EMA20/50、MACD、ATR、波动和局部支撑/阻力。
+2. **最新资讯**：按比特币、黄金、半导体、原油和宏观主题采集最近 48 小时标题。优先 NewsAPI，失败或无合格报道时使用 Google News RSS。保留发布时间、媒体、链接与引用 ID；合并重复报道，区分资产直接报道和宏观背景。
+3. **一次跨资产比较**：将真实数据一起发送给 `.env` 指定的模型，让 AI 对全部候选排序、选择方向、说明催化剂与失效条件。AI 不会自行联网，只能使用传入的行情和标题；标题不是经过核实的事件事实，也没有付费全文。
+4. **校验后输出**：校验品种权限、行情/资讯时效、引用 ID、价格关系、价差、主观确信度及成本后盈亏比。不成立的建议转为观望，保留模型原方向与原因；通过的候选再按模型原排名排列。
+
+数据缺失会明确显示，不填充虚构价格、宏观数值或情绪评分。AI 请求失败或 JSON 结构无效时保存数据和错误，以非零状态退出，不用规则分析冒充 AI 结果。
+
+采集时要求报价在 120 秒内；整个分析快照默认最多有效 15 分钟，包含采集和 AI 等待时间。过期需刷新。条件入场计划不表示当前已满足触发条件；模型确信度是主观分数，尚未通过回测校准。
+
+## 配置
+
+`.env` 示例：
+
+```dotenv
+OPENAI_API_KEY=你的密钥
+OPENAI_BASE_URL=https://openai945.cn/v1
+OPENAI_MODEL=gpt-6.1-sol
+OPENAI_PROVIDER=proxy
+OPENAI_READ_TIMEOUT=180
+OPENAI_MAX_RETRIES=2
+OPENAI_STREAM=true
 OPENAI_SEND_TEMPERATURE=false
-OPENAI_TEMPERATURE=1
-
-# 可选：新闻/社媒
+OKX_BASE_URL=https://www.okx.com
+# 可选；无密钥也可使用 RSS
 NEWSAPI_KEY=
-TWITTER_BEARER_TOKEN=
 ```
 
-> 若代理不接受自定义 temperature，请保持 `OPENAI_SEND_TEMPERATURE=false`。  
-> 如果更换支持温度的模型，可改为 true 并传递自定义值。
+AI 使用 `POST /v1/chat/completions`，默认读取 SSE 流来减少网关等待完整回答造成的超时；不完整的流不会被当作完整建议。服务不支持流时可设置 `OPENAI_STREAM=false`。网络超时、429 和 5xx（包括网关 524）最多重试两次，认证错误立即返回。读取超时允许 1–600 秒，重试次数允许 0–3。进程环境变量优先于 `.env`；更改配置后重新启动生效。
 
----
+`config/okx_assets.json` 控制资产集合、精确品种候选、资讯查询、标题相关关键词、分析周期和检查阈值。新流程向模型发送 `reasoning_effort=low` 来控制长请求耗时；模型不支持时可将配置中的 `reasoning_effort` 设为 `null`。默认最大价差 50 bps、模型确信度至少 0.6、往返费用/滑点估算 20 bps、成本后盈亏比至少 1.5。以区间内最差入场价计算，未来不确定的资金费率未纳入费用估算。
 
-## 🤖 OpenAI 代理说明
+这是市场研究入口，尚未实现资金分配、账户风险额度、回测或自动下单。新增资产需配置确切品种、资讯关键词和敞口含义。
 
-默认使用新接口：`POST {BASE_URL}/chat/completions`  
-请求示例（与 curl 一致逻辑）：
+## 代码结构与验证
+
+```text
+start.py                       # 默认 portfolio 入口
+config/okx_assets.json         # 五资产、周期与阈值
+ai_agent/okx_market.py         # 公开行情、时效和技术指标
+ai_agent/market_news.py        # 资讯采集、去重、来源与时间过滤
+ai_agent/portfolio_decision.py # 跨资产提示词、结构校验、报告
+ai_agent/openai_analyzer.py    # 共用的兼容AI接口与超时重试
+results/                      # 本地报告与原始数据（不提交）
+```
 
 ```bash
-curl https://jeniya.cn/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{
-    "model": "gpt-5-nano-2025-08-07",
-    "messages": [{"role":"user","content":"Say this is a test!"}]
-  }'
+python -m pip install pytest
+python -m pytest -q tests/test_okx_market.py tests/test_market_news.py tests/test_portfolio_decision.py tests/test_openai_transport.py
 ```
 
-系统自动：
-1. 优先官方 SDK（若可导入）
-2. 失败或空响应 → HTTP 后备通道
-3. 解析 JSON（提取目标价/止损/加仓价等）
-4. 全部失败 → 降级为规则分析
-
----
-
-## 📊 分析输出字段说明
-
-| 字段 | 含义 |
-|------|------|
-| 技术分析得分 | 多时间框架技术指标融合 |
-| 情感分析得分 | 新闻/社媒（占位或真实） |
-| 宏观经济得分 | 纳斯达克/VIX/DXY/黄金/政策 |
-| 综合得分 | 融合各子系统加权 |
-| AI建议 | HOLD / 买入 / 做多 / 做空 / 观望 |
-| 做多/做空信号 | 规则驱动信号（策略条件满足） |
-| 目标价（保守/激进） | AI估算的阶段性目标 |
-| 止损价 / 加仓价 | 风险控制与分批计划参考 |
-| 多时间框架得分 | 5m/15m/1h/4h 各自评分 |
-| 风险等级 / 建议仓位 | 动态风险管理输出 |
-
----
-
-## 📈 合约（多空）信号逻辑简述
-
-| 类型 | 核心条件（摘要） |
-|------|------------------|
-| 做多（enter_long） | RSI 未超买、价格上穿短期均线、AI综合得分>阈值、多时间框架不一致→谨慎 / 共振→加强 |
-| 平多（exit_long）  | AI转向 + 均线反转 + MACD死叉 或 综合得分转负 |
-| 做空（enter_short）| RSI 未超卖、价格跌破短期均线、AI综合得分<负阈值、时间框架偏空共振 |
-| 平空（exit_short） | 均线重新多头 / MACD金叉 / AI转中性或正向 |
-
-> 当前版本的真实下单由 Freqtrade 模块决定；本仓库默认分析/信号展示，不直接执行交易（可扩展）。
-
----
-
-## 🛠 安装步骤
-
-```bash
-git clone https://github.com/duwu/AI-Agent-Trading-System.git
-cd ai_agent_trading_system
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # 然后手动填充你的密钥
-python start.py --mode real --symbol BTCUSDT
-```
-
----
-
-## 🧮 多时间框架指标
-
-系统自动抓取四组K线：
-- RSI (Wilder) / MACD / 布林带百分位
-- 各框架形成独立得分（聚合时给 5m/15m/1h/4h 递增权重，默认 0.1/0.2/0.3/0.4）
-
----
-
-## 🌍 宏观数据来源（可扩展）
-
-| 指标 | 说明 | 当前实现 |
-|------|------|----------|
-| 纳斯达克趋势 | 日内涨跌幅分类 | Yahoo Finance |
-| 美联储政策倾向 | 利率/收益率代理 | 国债收益率参考 |
-| VIX | 恐慌指数 | Yahoo Finance / 缓存 |
-| DXY | 美元指数 | Yahoo Finance |
-| 黄金价格 | 参考避险需求 | XAU/USD 或 PAXG 近似 |
-| 评分映射 | 各权重组合 | 可在策略中调整 |
-
----
-
-## 🧠 OpenAI 提示词（简化版结构）
-
-模型获得：
-- 主时间框架(5m) + 高级别摘要
-- 多空关键指标（RSI/MACD/布林带位置）
-- 宏观摘要 & 风险水平
-- 期望返回 JSON（含方向 / 目标 / 止损 / 置信度）
-
----
-
-## 🧪 测试
-
-```bash
-python start.py --mode test
-# 或单跑分析
-python start.py --mode real --symbol BTCUSDT
-```
-
----
-
-## 🧷 安全与合规
-
-- 永远不要提交真实 API Key
-- 若 PR 涉及日志输出，请移除敏感字段
-- 频繁调用第三方接口注意速率限制
-- 模型输出不保证正确性，需人工验证
-
----
-
-## 🤝 贡献指南
-
-1. Fork & 创建分支：`feat/xxx` 或 `fix/xxx`
-2. 遵守提交格式：`feat: 增加合约空头信号权重` / `fix: 修复RSI计算错误`
-3. 添加/更新相关文档（如涉及用户操作改变）
-4. 提交 PR，模板中填写动机与测试方式
-
----
-
-## 🗺 Roadmap（简要）
-
-| 项目 | 状态 |
-|------|------|
-| Docker 支持 | 计划 |
-| 回测数据适配多空 | 计划 |
-| 多模型强化学习 | 计划 |
-| 交易所抽象层（多平台） | 计划 |
-| Web 可视化面板 | 计划 |
-
----
-
-## 📄 License
-
-建议添加开源协议（MIT / Apache-2.0 / GPL-3.0 等）。  
-在根目录创建 `LICENSE` 文件。例如 MIT：
-
-```
-MIT License Copyright (c) ...
-```
-
----
-
-## 📌 示例输出（节选）
-
-```
-交易对: BTC/USDT
-综合得分: +0.143 | AI建议: HOLD | 方向: 观望
-做多信号: 否 / 做空信号: 否
-多时间框架: 5m -0.01 | 15m -0.25 | 1h +0.03 | 4h -0.02
-AI目标价(保守/激进): 119,380 / 125,060
-AI止损: 109,370 | 加仓建议: 111,420
-风险等级: 10% | 建议仓位: 0%（未触发方向信号）
-```
-
----
-
-## ⚠ 免责声明
-
-本项目所有分析、信号与文字说明仅供研究、教学与策略原型探索之用，不构成任何投资、财务或法律建议。数字资产波动性高，请自担风险。使用即表示接受本条款。
-
----
-
-欢迎提出 Issue / PR 增强功能。祝探索顺利。
+旧版 Binance/Freqtrade 代码保留在 `strategies/`、`freqaimodels/` 和旧数据提供模块中。`--mode real`、`--mode strategy`、`--mode demo` 仍用于旧流程，需要完整 `requirements.txt`；它们不参与新的 OKX 跨资产决策。旧 `simple` 模式现在转入新分析入口；`--mode test` 运行项目测试。

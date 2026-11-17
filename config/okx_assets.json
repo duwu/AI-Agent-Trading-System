@@ -1,0 +1,62 @@
+{
+  "horizon": "未来1–3天",
+  "reasoning_effort": "low",
+  "timeframes": ["15m", "1H", "4H"],
+  "candle_limit": 120,
+  "news_lookback_hours": 48,
+  "max_spread_bps": 50,
+  "min_reward_risk": 1.5,
+  "round_trip_cost_bps": 20,
+  "min_confidence": 0.6,
+  "max_snapshot_age_seconds": 900,
+  "assets": [
+    {
+      "id": "BTC",
+      "name": "比特币",
+      "candidates": ["BTC-USDT-SWAP", "BTC-USDT"],
+      "news_query": "Bitcoin OR BTC OR cryptocurrency",
+      "news_keywords": ["bitcoin", "btc", "crypto", "cryptocurrency"],
+      "exposure": "BTC价格同向敞口；永续可多空，现货只做多。",
+      "risk_notes": "关注美元流动性、ETF资金流、监管和永续资金费率。"
+    },
+    {
+      "id": "XAUT",
+      "name": "Tether Gold 黄金代币",
+      "candidates": ["XAUT-USDT"],
+      "news_query": "\"gold price\" OR \"gold futures\" OR \"gold market\"",
+      "news_keywords": ["gold", "bullion", "xaut"],
+      "exposure": "黄金同向现货敞口。",
+      "risk_notes": "关注实际利率、美元、地缘政治和代币相对黄金的溢价；不自动替换为XAU合约。"
+    },
+    {
+      "id": "XSOXS",
+      "name": "SOXS 代币化ETF",
+      "product_source": "https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=XSOXS",
+      "candidates": ["XSOXS-USDT"],
+      "news_query": "semiconductor OR Nvidia OR SOXS OR SOXL",
+      "news_keywords": ["semiconductor", "semiconductors", "nvidia", "amd", "chip", "chips", "soxs", "soxl", "tsmc"],
+      "exposure": "买入XSOXS是半导体板块的每日约3倍反向敞口；long指买入代币，底层观点为看跌。",
+      "risk_notes": "每日杠杆重置、路径依赖、波动损耗、非美股时段溢价和流动性；不是长期恒定负3倍收益。"
+    },
+    {
+      "id": "XSOXL",
+      "name": "SOXL 代币化ETF",
+      "product_source": "https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=XSOXL",
+      "candidates": ["XSOXL-USDT"],
+      "news_query": "semiconductor OR Nvidia OR SOXS OR SOXL",
+      "news_keywords": ["semiconductor", "semiconductors", "nvidia", "amd", "chip", "chips", "soxs", "soxl", "tsmc"],
+      "exposure": "买入XSOXL是半导体板块的每日约3倍同向敞口；long指买入代币，底层观点为看涨。",
+      "risk_notes": "每日杠杆重置、路径依赖、波动损耗、非美股时段溢价和流动性；不是长期恒定3倍收益。"
+    },
+    {
+      "id": "CL",
+      "name": "WTI 原油永续",
+      "product_source": "https://www.okx.com/priapi/v5/rubik/public/coin-info?ccy=CL",
+      "candidates": ["CL-USDT-SWAP"],
+      "news_query": "\"crude oil\" OR WTI OR OPEC",
+      "news_keywords": ["oil", "crude", "wti", "opec"],
+      "exposure": "原油价格同向敞口；永续可多空。",
+      "risk_notes": "关注OPEC、库存、地缘政治、参考市场休市和永续资金费率。"
+    }
+  ]
+}
